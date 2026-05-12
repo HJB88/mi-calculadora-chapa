@@ -2,85 +2,98 @@ import streamlit as st
 import math
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Desarrollo Asimétrico 4 Lados", layout="wide")
+st.set_page_config(page_title="Plano de Trazado Completo", layout="wide")
 
-st.title("📏 Desarrollo de Chapa: Perímetro Asimétrico")
-st.markdown("Calcula el corte de chapa para piezas donde cada lado tiene pliegues distintos.")
+st.title("📏 Plano de Desarrollo Perimetral con Trazado")
+st.markdown("Genera el rectángulo de corte y todas las líneas de marcado para piezas asimétricas.")
 
-# --- PARÁMETROS TÉCNICOS ---
-st.sidebar.header("Parámetros del Material")
+# --- PARÁMETROS TÉCNICOS (DIVACO) ---
+st.sidebar.header("Material y Espesor")
 t = st.sidebar.number_input("Espesor (t) mm", min_value=0.1, value=1.5, step=0.1)
 material = st.sidebar.selectbox("Material", ["Acero Carbono", "Inoxidable", "Aluminio"])
 
-# Lógica de Factor K (Referencia 63277.jpg)
 if "Carbono" in material: k_factor = 0.33 if t <= 3.0 else 0.45
 elif "Inoxidable" in material: k_factor = 0.40
 else: k_factor = 0.45
 
-def calcular_desarrollo_lado(nombre_lado):
-    st.subheader(f"Configuración Lado {nombre_lado}")
-    n_pliegues = st.number_input(f"Nº pliegues {nombre_lado}", min_value=0, max_value=5, value=1, key=f"n_{nombre_lado}")
-    
-    desarrollo_lado = 0
-    for i in range(int(n_pliegues)):
+def calcular_detalles_lado(nombre_lado, key_suffix):
+    st.subheader(f"Lado {nombre_lado}")
+    n = st.number_input(f"Nº pliegues {nombre_lado}", 0, 5, 1, key=f"n_{key_suffix}")
+    desarrollos = []
+    for i in range(n):
         c1, c2 = st.columns(2)
-        alt = c1.number_input(f"Altura Pestaña {i+1} (mm)", value=20.0, key=f"l_{nombre_lado}_{i}")
-        rad = c2.number_input(f"Radio R{i+1} (mm)", value=t, key=f"r_{nombre_lado}_{i}")
-        
-        # Fórmula BA (Referencia 63277.jpg)
+        alt = c1.number_input(f"Altura {i+1}", value=20.0, key=f"l_{key_suffix}_{i}")
+        rad = c2.number_input(f"Radio {i+1}", value=t, key=f"r_{key_suffix}_{i}")
         ba = (90 / 180) * math.pi * (rad + (k_factor * t))
-        # Sumamos el tramo recto real + el estiramiento
-        desarrollo_lado += (alt - (rad + t)) + ba
-    return desarrollo_lado
+        # Guardamos el tramo recto y el BA para posicionar las líneas
+        desarrollos.append({'recto': alt - (rad + t), 'ba': ba})
+    return desarrollos
 
-# --- ENTRADA DE DIMENSIONES ---
-col_izq, col_der = st.columns(2)
-
-with col_izq:
+# --- ENTRADA DE DATOS ---
+col1, col2 = st.columns(2)
+with col1:
     base_x = st.number_input("Base central (Largo) mm", value=200.0)
-    des_izquierdo = calcular_desarrollo_lado("Izquierdo (Oeste)")
-    des_derecho = calcular_desarrollo_lado("Derecho (Este)")
+    data_izq = calcular_detalles_lado("Izquierdo (Oeste)", "izq")
+    data_der = calcular_detalles_lado("Derecho (Este)", "der")
 
-with col_der:
+with col2:
     base_z = st.number_input("Base central (Ancho) mm", value=100.0)
-    des_superior = calcular_desarrollo_lado("Superior (Norte)")
-    des_inferior = calcular_desarrollo_lado("Inferior (Sur)")
+    data_sup = calcular_detalles_lado("Superior (Norte)", "sup")
+    data_inf = calcular_detalles_lado("Inferior (Sur)", "inf")
 
-# --- CÁLCULO FINAL ---
-# El largo total es: Desarrollo Izq + Base X + Desarrollo Der
-# El ancho total es: Desarrollo Sup + Base Z + Desarrollo Inf
+# --- CÁLCULO DE POSICIONES ---
+des_izq_total = sum(d['recto'] + d['ba'] for d in data_izq)
+des_der_total = sum(d['recto'] + d['ba'] for d in data_der)
+des_inf_total = sum(d['recto'] + d['ba'] for d in data_inf)
+des_sup_total = sum(d['recto'] + d['ba'] for d in data_sup)
 
-largo_total = des_izquierdo + base_x + des_derecho
-ancho_total = des_superior + base_z + des_inferior
+largo_total = des_izq_total + base_x + des_der_total
+ancho_total = des_inf_total + base_z + des_sup_total
 
-# --- DIBUJO DEL PLANO ---
+# --- DIBUJO ---
 st.divider()
-st.header("3. Plano de Desarrollo de Corte")
+fig, ax = plt.subplots(figsize=(12, 8))
 
-fig, ax = plt.subplots(figsize=(10, 6))
+# Chapa base
+ax.add_patch(plt.Rectangle((0, 0), largo_total, ancho_total, facecolor='#f8f9fa', edgecolor='black', lw=2))
 
-# Chapa total
-rect_chapa = plt.Rectangle((0, 0), largo_total, ancho_total, linewidth=2, edgecolor='black', facecolor='#fffde7')
-ax.add_patch(rect_chapa)
+# Líneas Verticales (Plegados Izquierda y Derecha)
+acum = 0
+for i, d in enumerate(data_izq):
+    acum += d['recto'] + d['ba']/2
+    ax.axvline(x=acum, color='red', linestyle='--', lw=1)
+    ax.text(acum, -5, f"V{i+1}", color='red', ha='center', fontsize=8)
+    acum += d['ba']/2
 
-# Dibujo de la base central (líneas de pliegue principales)
-base_rect = plt.Rectangle((des_izquierdo, des_inferior), base_x, base_z, 
-                           linewidth=1, edgecolor='red', linestyle='--', facecolor='none', label='Líneas de pliegue')
-ax.add_patch(base_rect)
+# Desde el otro lado (Derecha)
+acum = largo_total
+for i, d in enumerate(data_der):
+    acum -= (d['recto'] + d['ba']/2)
+    ax.axvline(x=acum, color='red', linestyle='--', lw=1)
+    ax.text(acum, -5, f"V_der{i+1}", color='red', ha='center', fontsize=8)
+    acum -= d['ba']/2
 
-# Etiquetas de dimensiones
-ax.text(largo_total/2, ancho_total + 5, f"LARGO DE CORTE: {largo_total:.2f} mm", ha='center', fontweight='bold', color='blue')
-ax.text(-15, ancho_total/2, f"ANCHO DE CORTE: {ancho_total:.2f} mm", va='center', rotation=90, fontweight='bold', color='blue')
+# Líneas Horizontales (Plegados Inferior y Superior)
+acum = 0
+for i, d in enumerate(data_inf):
+    acum += d['recto'] + d['ba']/2
+    ax.axhline(y=acum, color='blue', linestyle='--', lw=1)
+    ax.text(-10, acum, f"H{i+1}", color='blue', va='center', fontsize=8)
+    acum += d['ba']/2
 
-ax.set_xlim(-40, largo_total + 40)
-ax.set_ylim(-40, ancho_total + 40)
+acum = ancho_total
+for i, d in enumerate(data_sup):
+    acum -= (d['recto'] + d['ba']/2)
+    ax.axhline(y=acum, color='blue', linestyle='--', lw=1)
+    ax.text(-10, acum, f"H_sup{i+1}", color='blue', va='center', fontsize=8)
+    acum -= d['ba']/2
+
+# Etiquetas de dimensiones finales
+ax.text(largo_total/2, ancho_total + 10, f"CORTE: {largo_total:.2f} mm", ha='center', fontweight='bold', size=14)
+ax.text(largo_total + 10, ancho_total/2, f"{ancho_total:.2f} mm", va='center', rotation=270, fontweight='bold', size=14)
+
 ax.set_aspect('equal')
 ax.axis('off')
 st.pyplot(fig)
 
-# --- RESULTADOS ---
-c_res1, c_res2 = st.columns(2)
-c_res1.metric("Chapa Largo (X)", f"{largo_total:.2f} mm")
-c_res2.metric("Chapa Ancho (Z)", f"{ancho_total:.2f} mm")
-
-st.success(f"### Medida de Guillotina/Láser: {largo_total:.2f} x {ancho_total:.2f} mm")
+st.success(f"### Medida de Chapa: {largo_total:.2f} x {ancho_total:.2f} mm")
