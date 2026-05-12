@@ -2,12 +2,12 @@ import streamlit as st
 import math
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Desarrollo Bandeja 4 Lados", layout="wide")
+st.set_page_config(page_title="Desarrollo Asimétrico 4 Lados", layout="wide")
 
-st.title("📏 Desarrollo de Chapa: Bandeja 4 Lados")
-st.markdown("Calcula el corte de chapa para piezas con plegados en todo el perímetro.")
+st.title("📏 Desarrollo de Chapa: Perímetro Asimétrico")
+st.markdown("Calcula el corte de chapa para piezas donde cada lado tiene pliegues distintos.")
 
-# --- PARÁMETROS TÉCNICOS (Basados en DIVACO Tooling) ---
+# --- PARÁMETROS TÉCNICOS ---
 st.sidebar.header("Parámetros del Material")
 t = st.sidebar.number_input("Espesor (t) mm", min_value=0.1, value=1.5, step=0.1)
 material = st.sidebar.selectbox("Material", ["Acero Carbono", "Inoxidable", "Aluminio"])
@@ -17,67 +17,70 @@ if "Carbono" in material: k_factor = 0.33 if t <= 3.0 else 0.45
 elif "Inoxidable" in material: k_factor = 0.40
 else: k_factor = 0.45
 
-# --- EJE X (LARGO) ---
-st.header("1. Desarrollo Longitudinal (Largo)")
-num_x = st.number_input("Nº de pliegues por cada lado del largo", min_value=1, max_value=5, value=1)
-base_x = st.number_input("Base central (Largo exterior) mm", value=200.0)
-
-ba_total_x = 0
-rectos_x = base_x - 2*(t + t) # Ajuste base inicial aproximado
-
-for i in range(int(num_x)):
-    col1, col2 = st.columns(2)
-    alt = col1.number_input(f"Altura Pestaña X{i+1} (mm)", value=20.0, key=f"lx_{i}")
-    rad = col2.number_input(f"Radio R{i+1} (mm)", value=t, key=f"rx_{i}")
+def calcular_desarrollo_lado(nombre_lado):
+    st.subheader(f"Configuración Lado {nombre_lado}")
+    n_pliegues = st.number_input(f"Nº pliegues {nombre_lado}", min_value=0, max_value=5, value=1, key=f"n_{nombre_lado}")
     
-    ba = (90 / 180) * math.pi * (rad + (k_factor * t))
-    ba_total_x += ba * 2 # Dos lados
-    rectos_x += (alt - (rad + t)) * 2
+    desarrollo_lado = 0
+    for i in range(int(n_pliegues)):
+        c1, c2 = st.columns(2)
+        alt = c1.number_input(f"Altura Pestaña {i+1} (mm)", value=20.0, key=f"l_{nombre_lado}_{i}")
+        rad = c2.number_input(f"Radio R{i+1} (mm)", value=t, key=f"r_{nombre_lado}_{i}")
+        
+        # Fórmula BA (Referencia 63277.jpg)
+        ba = (90 / 180) * math.pi * (rad + (k_factor * t))
+        # Sumamos el tramo recto real + el estiramiento
+        desarrollo_lado += (alt - (rad + t)) + ba
+    return desarrollo_lado
 
-# --- EJE Z (ANCHO) ---
-st.header("2. Desarrollo Transversal (Ancho)")
-num_z = st.number_input("Nº de pliegues por cada lado del ancho", min_value=1, max_value=5, value=1)
-base_z = st.number_input("Base central (Ancho exterior) mm", value=100.0)
+# --- ENTRADA DE DIMENSIONES ---
+col_izq, col_der = st.columns(2)
 
-ba_total_z = 0
-rectos_z = base_z - 2*(t + t)
+with col_izq:
+    base_x = st.number_input("Base central (Largo) mm", value=200.0)
+    des_izquierdo = calcular_desarrollo_lado("Izquierdo (Oeste)")
+    des_derecho = calcular_desarrollo_lado("Derecho (Este)")
 
-for i in range(int(num_z)):
-    col1, col2 = st.columns(2)
-    alt_z = col1.number_input(f"Altura Pestaña Z{i+1} (mm)", value=20.0, key=f"lz_{i}")
-    rad_z = col2.number_input(f"Radio Rz{i+1} (mm)", value=t, key=f"rz_{i}")
-    
-    ba_z = (90 / 180) * math.pi * (rad_z + (k_factor * t))
-    ba_total_z += ba_z * 2
-    rectos_z += (alt_z - (rad_z + t)) * 2
+with col_der:
+    base_z = st.number_input("Base central (Ancho) mm", value=100.0)
+    des_superior = calcular_desarrollo_lado("Superior (Norte)")
+    des_inferior = calcular_desarrollo_lado("Inferior (Sur)")
 
-# --- RESULTADOS ---
+# --- CÁLCULO FINAL ---
+# El largo total es: Desarrollo Izq + Base X + Desarrollo Der
+# El ancho total es: Desarrollo Sup + Base Z + Desarrollo Inf
+
+largo_total = des_izquierdo + base_x + des_derecho
+ancho_total = des_superior + base_z + des_inferior
+
+# --- DIBUJO DEL PLANO ---
 st.divider()
-total_x = rectos_x + ba_total_x
-total_z = rectos_z + ba_total_z
+st.header("3. Plano de Desarrollo de Corte")
 
-# --- DIBUJO DEL DESARROLLO (PLANO DE CORTE) ---
-st.header("3. Plano de Desarrollo (Corte Laser/Cizalla)")
+fig, ax = plt.subplots(figsize=(10, 6))
 
-fig, ax = plt.subplots(figsize=(8, 6))
-# Dibujo de la chapa plana total
-rect = plt.Rectangle((0, 0), total_x, total_z, linewidth=2, edgecolor='black', facecolor='#e3f2fd')
-ax.add_patch(rect)
+# Chapa total
+rect_chapa = plt.Rectangle((0, 0), largo_total, ancho_total, linewidth=2, edgecolor='black', facecolor='#fffde7')
+ax.add_patch(rect_chapa)
 
-# Líneas de plegado (Esquema simplificado)
-ax.axvline(x=total_x*0.15, color='red', linestyle='--')
-ax.axvline(x=total_x*0.85, color='red', linestyle='--')
-ax.axhline(y=total_z*0.15, color='red', linestyle='--')
-ax.axhline(y=total_z*0.85, color='red', linestyle='--')
+# Dibujo de la base central (líneas de pliegue principales)
+base_rect = plt.Rectangle((des_izquierdo, des_inferior), base_x, base_z, 
+                           linewidth=1, edgecolor='red', linestyle='--', facecolor='none', label='Líneas de pliegue')
+ax.add_patch(base_rect)
 
-ax.text(total_x/2, total_z + 5, f"LARGO TOTAL: {total_x:.2f} mm", ha='center', fontweight='bold', color='blue')
-ax.text(-15, total_z/2, f"ANCHO TOTAL: {total_z:.2f} mm", va='center', rotation=90, fontweight='bold', color='blue')
+# Etiquetas de dimensiones
+ax.text(largo_total/2, ancho_total + 5, f"LARGO DE CORTE: {largo_total:.2f} mm", ha='center', fontweight='bold', color='blue')
+ax.text(-15, ancho_total/2, f"ANCHO DE CORTE: {ancho_total:.2f} mm", va='center', rotation=90, fontweight='bold', color='blue')
 
-ax.set_xlim(-30, total_x + 30)
-ax.set_ylim(-30, total_z + 30)
+ax.set_xlim(-40, largo_total + 40)
+ax.set_ylim(-40, ancho_total + 40)
 ax.set_aspect('equal')
 ax.axis('off')
 st.pyplot(fig)
 
-st.success(f"### Medida final de la chapa: {total_x:.2f} x {total_z:.2f} mm")
-st.info("Este cálculo descuenta automáticamente el espesor y radio en los 4 costados.")
+# --- RESULTADOS ---
+c_res1, c_res2 = st.columns(2)
+c_res1.metric("Chapa Largo (X)", f"{largo_total:.2f} mm")
+c_res2.metric("Chapa Ancho (Z)", f"{ancho_total:.2f} mm")
+
+st.success(f"### Medida de Guillotina/Láser: {largo_total:.2f} x {ancho_total:.2f} mm")
