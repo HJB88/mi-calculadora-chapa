@@ -2,80 +2,104 @@ import streamlit as st
 import math
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Plano de Desarrollo 2D", layout="wide")
+st.set_page_config(page_title="Desarrollo Multi-Plegado", layout="wide")
 
-st.title("📏 Plano de Desarrollo (Chapa Plana)")
-st.markdown("Genera las medidas de corte y las líneas de marcado para el taller.")
+st.title("📏 Plano de Desarrollo: Multi-Plegado")
+st.markdown("Calcula la chapa plana para piezas con múltiples dobleces consecutivos.")
 
 # --- BARRA LATERAL ---
-st.sidebar.header("Parámetros Técnicos")
-t = st.sidebar.number_input("Espesor (t) mm", min_value=0.1, value=1.5)
+st.sidebar.header("Parámetros del Material")
+t = st.sidebar.number_input("Espesor (t) mm", min_value=0.1, value=1.5, step=0.1)
 material = st.sidebar.selectbox("Material", ["Acero Carbono", "Inoxidable", "Aluminio"])
+ancho_z = st.sidebar.number_input("Ancho de la pieza (mm)", min_value=1.0, value=100.0)
 
-# Lógica Factor K (Referencia 63277.jpg)
+# Factor K según tus tablas (63277.jpg)
 if "Carbono" in material: k_factor = 0.33 if t <= 3.0 else 0.45
 elif "Inoxidable" in material: k_factor = 0.40
 else: k_factor = 0.45
 
-# --- CÁLCULO EJE X (Perfil) ---
-st.header("1. Desarrollo Longitudinal (Eje X)")
-c1, c2 = st.columns(2)
-l1_ext = c1.number_input("Ala inicial exterior (mm)", value=30.0)
-l2_ext = c2.number_input("Ala final exterior (mm)", value=30.0)
-base_x_ext = st.number_input("Base central exterior (mm)", value=100.0)
-r_x = st.number_input("Radio de doblado en X", value=t)
+# --- ENTRADA DE DATOS ---
+st.header("1. Definición de la Pieza (Cotas Exteriores)")
+num_pliegues = st.number_input("¿Cuántos dobleces tiene?", min_value=1, max_value=15, value=2)
 
-# Cálculo de BA y tramos reales
-ba_x = (90 / 180) * math.pi * (r_x + (k_factor * t))
-recto_ala1 = l1_ext - (r_x + t)
-recto_base_x = base_x_ext - 2*(r_x + t)
-recto_ala2 = l2_ext - (r_x + t)
+caras_exteriores = []
+pliegues_data = []
 
-desarrollo_x = recto_ala1 + recto_base_x + recto_ala2 + 2*ba_x
+# Cara inicial
+l1_ext = st.number_input("Longitud Cara 1 (Ext) mm", value=40.0)
+caras_exteriores.append(l1_ext)
 
-# --- CÁLCULO EJE Z (Ancho) ---
-st.header("2. Desarrollo Transversal (Eje Z)")
-ancho_base_ext = st.number_input("Ancho base exterior (mm)", value=80.0)
-ala_z_ext = st.number_input("Altura pestañas laterales (mm)", value=20.0)
-r_z = st.number_input("Radio de doblado en Z", value=t)
+st.write("---")
+for i in range(int(num_pliegues)):
+    c1, c2, c3 = st.columns(3)
+    ang = c1.number_input(f"Ángulo {i+1} (°)", value=90, key=f"ang_{i}")
+    rad = c2.number_input(f"Radio R{i+1} (mm)", value=t, key=f"rad_{i}")
+    l_sig = c3.number_input(f"Siguiente Cara {i+2} (Ext) mm", value=40.0, key=f"l_{i}")
+    
+    caras_exteriores.append(l_sig)
+    pliegues_data.append({'ang': ang, 'rad': rad})
 
-ba_z = (90 / 180) * math.pi * (r_z + (k_factor * t))
-recto_base_z = ancho_base_ext - 2*(r_z + t)
-recto_ala_z = ala_z_ext - (r_z + t)
+# --- CÁLCULO TÉCNICO ---
+tramos_reales = []
+ba_valores = []
+posiciones_pliegue = [] # Para el dibujo
+desarrollo_total = 0
 
-desarrollo_z = recto_ala_z + recto_base_z + recto_ala_z + 2*ba_z
+# Procesamos cada pliegue y cara
+for i in range(int(num_pliegues)):
+    ang = pliegues_data[i]['ang']
+    rad = pliegues_data[i]['rad']
+    
+    # Tolerancia de doblado (Fórmula 63277.jpg)
+    ba = (ang / 180) * math.pi * (rad + (k_factor * t))
+    ba_valores.append(ba)
+    
+    # Tramo recto real (descontando R y t de las caras exteriores)
+    if i == 0:
+        # Primer tramo recto
+        recto = caras_exteriores[i] - (rad + t)
+        tramos_reales.append(recto)
+        posiciones_pliegue.append(recto + ba/2)
+        desarrollo_total += recto + ba
+    else:
+        # Tramos intermedios (descuentan por ambos lados)
+        recto = caras_exteriores[i] - 2*(rad + t)
+        tramos_reales.append(recto)
+        # La posición es el acumulado anterior + el tramo + mitad del BA actual
+        posiciones_pliegue.append(desarrollo_total + recto + ba/2)
+        desarrollo_total += recto + ba
 
-# --- DIBUJO DEL PLANO DE DESARROLLO ---
-st.header("3. Plano de Corte y Marcado")
+# Último tramo recto
+ultimo_recto = caras_exteriores[-1] - (pliegues_data[-1]['rad'] + t)
+tramos_reales.append(ultimo_recto)
+desarrollo_total += ultimo_recto
 
-fig, ax = plt.subplots(figsize=(10, 6))
+# --- DIBUJO DEL PLANO ---
+st.header("2. Plano de Trazado para Corte y Marcado")
 
-# Dibujo del contorno de la chapa plana
-rect = plt.Rectangle((0, 0), desarrollo_x, desarrollo_z, linewidth=2, edgecolor='black', facecolor='none')
+fig, ax = plt.subplots(figsize=(12, 5))
+
+# Dibujo de la chapa plana
+rect = plt.Rectangle((0, 0), desarrollo_total, ancho_z, linewidth=2, edgecolor='black', facecolor='#f0f0f0')
 ax.add_patch(rect)
 
-# Líneas de plegado en X (verticales)
-pos_p1_x = recto_ala1 + ba_x/2
-pos_p2_x = desarrollo_x - (recto_ala2 + ba_x/2)
-ax.axvline(x=pos_p1_x, color='red', linestyle='--', label='Líneas de pliegue')
-ax.axvline(x=pos_p2_x, color='red', linestyle='--')
+# Dibujar cada línea de plegado
+for pos in posiciones_pliegue:
+    ax.axvline(x=pos, color='red', linestyle='--', alpha=0.7)
+    ax.text(pos, ancho_z + 2, f"{pos:.1f}", color='red', fontsize=8, ha='center', rotation=45)
 
-# Líneas de plegado en Z (horizontales)
-pos_p1_z = recto_ala_z + ba_z/2
-pos_p2_z = desarrollo_z - (recto_ala_z + ba_z/2)
-ax.axhline(y=pos_p1_z, color='red', linestyle='--')
-ax.axhline(y=pos_p2_z, color='red', linestyle='--')
+# Acotación total
+ax.text(desarrollo_total/2, -15, f"LARGO DE DESARROLLO: {desarrollo_total:.2f} mm", 
+        ha='center', fontsize=12, color='blue', fontweight='bold')
+ax.text(-10, ancho_z/2, f"{ancho_z} mm", va='center', rotation=90, fontweight='bold')
 
-# Acotación del total
-ax.text(desarrollo_x/2, desarrollo_z + 5, f"LARGO TOTAL: {desarrollo_x:.2f} mm", ha='center', fontsize=12, color='blue', fontweight='bold')
-ax.text(-10, desarrollo_z/2, f"ANCHO TOTAL: {desarrollo_z:.2f} mm", va='center', rotation=90, fontsize=12, color='blue', fontweight='bold')
-
-ax.set_xlim(-20, desarrollo_x + 20)
-ax.set_ylim(-20, desarrollo_z + 20)
+ax.set_xlim(-20, desarrollo_total + 20)
+ax.set_ylim(-30, ancho_z + 30)
 ax.set_aspect('equal')
 ax.axis('off')
 
 st.pyplot(fig)
 
-st.success(f"### MEDIDA DE CORTE: {desarrollo_x:.2f} x {desarrollo_z:.2f} mm")
-st.info("Las líneas rojas punteadas indican el centro de la zona de doblado (donde baja el punzón).")
+# --- RESUMEN ---
+st.success(f"### Longitud de Corte: {desarrollo_total:.2f} mm")
+st.info("💡 **Las líneas rojas punteadas** indican la posición de marcado desde el borde izquierdo (0).")
