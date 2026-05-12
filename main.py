@@ -3,109 +3,85 @@ import math
 import matplotlib.pyplot as plt
 
 # Configuración de la página
-st.set_page_config(page_title="Calculadora DIVACO - Medidas Exteriores", page_icon="🛠️")
+st.set_page_config(page_title="DIVACO - Plano de Plegado", page_icon="📏", layout="wide")
 
-st.title("🛠️ Calculadora de Plegado (Medidas Exteriores)")
-st.markdown("Cálculo preciso de la longitud de corte basado en cotas externas.")
+st.title("📏 Generador de Plano Acotado para Taller")
+st.markdown("Calcula el desarrollo y genera un esquema con medidas exteriores para impresión.")
 
-# --- BARRA LATERAL ---
-st.sidebar.header("Configuración del Material")
-material = st.sidebar.selectbox(
-    "Selecciona el Material",
-    ["Acero al Carbono / Galvanizado", "Acero Inoxidable (304)", "Aluminio (1060)"]
-)
+# --- BARRA LATERAL (CONFIGURACIÓN TÉCNICA) ---
+st.sidebar.header("Datos Técnicos")
+material = st.sidebar.selectbox("Material", ["Acero Carbono", "Inoxidable", "Aluminio"])
+t = st.sidebar.number_input("Espesor (t) mm", min_value=0.1, value=1.0, step=0.1)
 
-t = st.sidebar.number_input("Espesor (t) en mm", min_value=0.1, max_value=20.0, value=1.0, step=0.1)
+# Lógica de Factor K (Referencia 63277.jpg)
+if "Carbono" in material: k_factor = 0.33 if t <= 3.0 else 0.45
+elif "Inoxidable" in material: k_factor = 0.40
+else: k_factor = 0.45
 
-# Lógica de Factor K y Radio Mínimo (Referencia 63277.jpg y 63275.jpg)
-if "Acero al Carbono" in material:
-    k_factor = 0.33 if t <= 3.0 else 0.45
-    r_min = 0.5 * t if t <= 1.0 else 1.0 * t
-elif "Inoxidable" in material:
-    k_factor = 0.40
-    r_min = 1.0 * t
-else:
-    k_factor = 0.45
-    r_min = 1.0 * t
+# --- ENTRADA DE MEDIDAS ---
+st.header("1. Medidas de la Pieza (Caras Exteriores)")
+num_pliegues = st.number_input("Número de dobleces", min_value=1, max_value=10, value=1)
 
-st.sidebar.info(f"**Factor K:** {k_factor} | **R mín:** {r_min} mm")
-
-# --- ENTRADA DE DATOS ---
-st.header("Definición de la Pieza")
-tipo_medida = st.radio("Las medidas introducidas son:", ["Exteriores (Cota total)", "Interiores (Tramo recto)"])
-
-num_pliegues = st.number_input("¿Cuántos dobleces tiene?", min_value=1, max_value=10, value=1)
-
-total_rectos_calculados = 0
+medidas_input = []
+total_rectos_reales = 0
 total_ba = 0
-puntos_x = [0]
-puntos_y = [0]
-angulo_actual = 0 
 
-st.divider()
+col_ini = st.columns(2)
+l_ini = col_ini[0].number_input("Longitud Cara 1 (Exterior) mm", min_value=1.0, value=50.0)
+medidas_input.append(l_ini)
 
-# Función para ajustar tramos si son medidas exteriores
-def ajustar_tramo(valor, radio, espesor, es_punta=False):
-    if tipo_medida == "Interiores (Tramo recto)":
-        return valor
-    # Si es exterior, restamos el Radio y el Espesor para obtener el tramo recto real
-    # En las puntas solo se resta una vez, en tramos intermedios se restaría por ambos lados
-    return valor - (radio + espesor)
-
-# Primer tramo
-l_input_inicial = st.number_input("Longitud Cara Inicial (mm)", min_value=1.0, value=50.0)
-
-# Para el primer dibujo necesitamos el radio del primer pliegue
-r_primero = st.session_state.get("rad_0", t)
-l_recto_inicial = ajustar_tramo(l_input_inicial, r_primero, t) if tipo_medida == "Exteriores (Cota total)" else l_input_inicial
-
-total_rectos_calculados += l_recto_inicial
-puntos_x.append(l_recto_inicial)
-puntos_y.append(0)
-
+st.write("---")
 for i in range(num_pliegues):
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        dir_p = st.selectbox(f"Doblado {i+1}", ["Arriba/Der", "Abajo/Izq"], key=f"dir_{i}")
-    with col2:
-        ang = st.number_input("Ángulo (°)", min_value=1, max_value=170, value=90, key=f"ang_{i}")
-    with col3:
-        rad = st.number_input("Radio (R)", min_value=0.1, value=t, key=f"rad_{i}")
-    with col4:
-        l_input_sig = st.number_input("Siguiente Cara (mm)", min_value=1.0, value=50.0, key=f"l_{i}")
-
-    # Cálculo de BA (Fórmula técnica 63277.jpg)
+    c1, c2, c3, c4 = st.columns(4)
+    dir_p = c1.selectbox(f"Sentido {i+1}", ["Arriba", "Abajo"], key=f"d_{i}")
+    ang = c2.number_input(f"Ángulo {i+1} (°)", min_value=1, max_value=170, value=90, key=f"a_{i}")
+    rad = c3.number_input(f"Radio {i+1} (R)", min_value=0.1, value=t, key=f"r_{i}")
+    l_sig = c4.number_input(f"Cara {i+2} (Ext) mm", min_value=1.0, value=50.0, key=f"l_{i}")
+    
+    medidas_input.append(l_sig)
+    
+    # Cálculo de BA y tramos rectos reales
     ba = (ang / 180) * math.pi * (rad + (k_factor * t))
     total_ba += ba
     
-    # Ajuste de medida exterior a tramo recto real
-    l_recto_sig = ajustar_tramo(l_input_sig, rad, t) if tipo_medida == "Exteriores (Cota total)" else l_input_sig
-    total_rectos_calculados += l_recto_sig
+    # Ajuste de tramos para el cálculo de corte
+    total_rectos_reales += (l_sig - (rad + t))
+    if i == 0: total_rectos_reales += (l_ini - (rad + t))
 
-    # Geometría para el dibujo
-    cambio_ang = ang if "Arriba" in dir_p else -ang
-    angulo_actual += cambio_ang
-    rad_ang = math.radians(angulo_actual)
+# --- GENERACIÓN DEL DIBUJO ACOTADO ---
+st.header("2. Esquema de Plegado (Para Imprimir)")
+
+fig, ax = plt.subplots(figsize=(10, 6))
+px, py = [0], [0]
+ang_acumulado = 0
+
+for i, l_cara in enumerate(medidas_input):
+    # Dibujo del tramo
+    rad_ang = math.radians(ang_acumulado)
+    dx = l_cara * math.cos(rad_ang)
+    dy = l_cara * math.sin(rad_ang)
     
-    nuevo_x = puntos_x[-1] + l_recto_sig * math.cos(rad_ang)
-    nuevo_y = puntos_y[-1] + l_recto_sig * math.sin(rad_ang)
-    puntos_x.append(nuevo_x)
-    puntos_y.append(nuevo_y)
+    # Dibujar línea de la pieza
+    ax.plot([px[-1], px[-1] + dx], [py[-1], py[-1] + dy], color="black", linewidth=3)
+    
+    # Añadir ACOTACIÓN (Texto con la medida exterior)
+    mx, my = px[-1] + dx/2, py[-1] + dy/2
+    ax.text(mx, my + 2, f"{l_cara} mm", color="blue", fontsize=10, fontweight='bold', ha='center')
+    
+    px.append(px[-1] + dx)
+    py.append(py[-1] + dy)
+    
+    if i < num_pliegues:
+        # Actualizar ángulo para el siguiente tramo
+        sentido = st.session_state[f"d_{i}"]
+        ang_giro = st.session_state[f"a_{i}"]
+        ang_acumulado += ang_giro if sentido == "Arriba" else -ang_giro
 
-# --- VISUALIZACIÓN ---
-st.subheader("Esquema del Perfil")
-fig, ax = plt.subplots()
-ax.plot(puntos_x, puntos_y, marker='o', color='#1E88E5', linewidth=t+1 if t < 5 else 6)
 ax.set_aspect('equal')
-ax.grid(True, linestyle='--', alpha=0.5)
+ax.axis('off') # Quitamos los ejes para que parezca un plano limpio
 st.pyplot(fig)
 
-# --- RESULTADOS ---
-st.divider()
-longitud_final = total_rectos_calculados + total_ba
-st.metric("LONGITUD DE DESARROLLO (CORTE)", f"{longitud_final:.2f} mm")
-
-with st.expander("Ver detalles del cálculo"):
-    st.write(f"**Suma de tramos rectos reales:** {total_rectos_calculados:.2f} mm")
-    st.write(f"**Tolerancia de doblado total (BA):** {total_ba:.2f} mm")
-    st.caption("Nota: El cálculo convierte tus medidas exteriores a la línea neutra para asegurar la precisión.")
+# --- RESULTADO FINAL ---
+desarrollo = total_rectos_reales + total_ba
+st.success(f"### LONGITUD DE CORTE: {desarrollo:.2f} mm")
+st.info("💡 **Consejo de impresión:** Pulsa `Ctrl + P` en tu teclado y selecciona 'Guardar como PDF' o imprime directamente.")
