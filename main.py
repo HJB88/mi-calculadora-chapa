@@ -1,82 +1,76 @@
 import streamlit as st
 import math
-import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 
-st.set_page_config(page_title="DIVACO 3D - Plegado Profesional", layout="wide")
+st.set_page_config(page_title="DIVACO 3D Multi-Eje", layout="wide")
 
-st.title("📏 Calculadora de Plegado con Visualización 3D")
-st.markdown("Genera el desarrollo de corte y verifica la pieza en un entorno tridimensional.")
+st.title("🛠️ Calculadora 3D: Pliegues en X y Z")
+st.markdown("Calcula el desarrollo total para piezas con pestañas en ambos ejes.")
 
-# --- DATOS TÉCNICOS ---
-st.sidebar.header("Configuración Técnica")
+# --- CONFIGURACIÓN TÉCNICA ---
+st.sidebar.header("Material y Espesor")
 material = st.sidebar.selectbox("Material", ["Acero Carbono", "Inoxidable", "Aluminio"])
 t = st.sidebar.number_input("Espesor (t) mm", min_value=0.1, value=1.0)
-ancho_pieza = st.sidebar.number_input("Ancho de la pieza (Z) mm", min_value=1.0, value=100.0)
 
 # Factor K (Referencia 63277.jpg)
 if "Carbono" in material: k_factor = 0.33 if t <= 3.0 else 0.45
 elif "Inoxidable" in material: k_factor = 0.40
 else: k_factor = 0.45
 
-# --- ENTRADA DE MEDIDAS ---
-st.header("1. Dimensiones Exteriores")
-num_pliegues = st.number_input("Número de dobleces", min_value=1, max_value=10, value=1)
+# --- EJE X (Perfil Principal) ---
+st.header("1. Pliegues Perfil Principal (Eje X)")
+num_x = st.number_input("Número de dobleces en X", min_value=1, max_value=10, value=1)
+l_ini_x = st.number_input("Largo Cara Inicial (mm)", value=50.0)
 
-medidas_input = []
-total_rectos_reales = 0
-total_ba = 0
+rectos_x = l_ini_x
+ba_total_x = 0
+coords_x, coords_y = [0, l_ini_x], [0, 0]
+ang_acum_x = 0
 
-# Primera Cara
-l_ini = st.number_input("Longitud Cara 1 (Ext) mm", min_value=1.0, value=50.0)
-medidas_input.append(l_ini)
-
-# Definición de pliegues
-config_pliegues = []
-for i in range(num_pliegues):
-    st.write(f"--- Doblez {i+1} ---")
-    c1, c2, c3, c4 = st.columns(4)
-    dir_p = c1.selectbox("Sentido", ["Arriba", "Abajo"], key=f"d_{i}")
-    ang = c2.number_input("Ángulo (°)", min_value=1, max_value=170, value=90, key=f"a_{i}")
-    rad = c3.number_input("Radio (R)", min_value=0.1, value=t, key=f"r_{i}")
-    l_sig = c4.number_input("Siguiente Cara (Ext) mm", min_value=1.0, value=50.0, key=f"l_{i}")
+for i in range(int(num_x)):
+    c1, c2, c3 = st.columns(3)
+    ang = c1.number_input(f"Ángulo X{i+1}", value=90.0, key=f"ax_{i}")
+    rad = c2.number_input(f"Radio X{i+1}", value=t, key=f"rx_{i}")
+    l_sig = c3.number_input(f"Cara X{i+2} (mm)", value=50.0, key=f"lx_{i}")
     
-    medidas_input.append(l_sig)
-    config_pliegues.append({'dir': dir_p, 'ang': ang, 'rad': rad})
-    
-    # Cálculo técnico para longitud de corte (Referencia 63277.jpg)
+    # Cálculos X (Referencia 63277.jpg)
     ba = (ang / 180) * math.pi * (rad + (k_factor * t))
-    total_ba += ba
-    total_rectos_reales += (l_sig - (rad + t))
-    if i == 0: total_rectos_reales += (l_ini - (rad + t))
-
-# --- GENERACIÓN DE COORDENADAS 3D ---
-x, y = [0, medidas_input[0]], [0, 0]
-ang_acumulado = 0
-
-for i in range(num_pliegues):
-    giro = config_pliegues[i]['ang'] if config_pliegues[i]['dir'] == "Arriba" else -config_pliegues[i]['ang']
-    ang_acumulado += giro
-    rad_ang = math.radians(ang_acumulado)
+    ba_total_x += ba
+    rectos_x += (l_sig - (rad + t))
     
-    x.append(x[-1] + medidas_input[i+1] * math.cos(rad_ang))
-    y.append(y[-1] + medidas_input[i+1] * math.sin(rad_ang))
+    ang_acum_x += ang
+    rad_ang = math.radians(ang_acum_x)
+    coords_x.append(coords_x[-1] + l_sig * math.cos(rad_ang))
+    coords_y.append(coords_y[-1] + l_sig * math.sin(rad_ang))
 
-# --- VISUALIZACIÓN 3D (PLOTLY) ---
-st.header("2. Modelo 3D Interactivo")
-fig_3d = go.Figure()
+# --- EJE Z (Pestañas Laterales) ---
+st.header("2. Pliegues Laterales (Eje Z)")
+ancho_base = st.number_input("Ancho Base (Z) mm", value=100.0)
+num_z = st.number_input("¿Pestañas laterales?", min_value=0, max_value=2, step=1)
 
-# Creamos las dos caras del ancho de la pieza para dar volumen
-for z_pos in [0, ancho_pieza]:
-    fig_3d.add_trace(go.Scatter3d(x=x, y=y, z=[z_pos]*len(x), mode='lines', line=dict(color='silver', width=5)))
+rectos_z = ancho_base
+ba_total_z = 0
 
-# Unimos las caras para crear el sólido
-for i in range(len(x)):
-    fig_3d.add_trace(go.Scatter3d(x=[x[i], x[i]], y=[y[i], y[i]], z=[0, ancho_pieza], mode='lines', line=dict(color='gray', width=2)))
+if num_z > 0:
+    c_z1, c_z2 = st.columns(2)
+    l_pestaña = c_z1.number_input("Largo de Pestaña (mm)", value=20.0)
+    rad_z = c_z2.number_input("Radio Pestaña (mm)", value=t)
+    
+    # Calculamos para las pestañas (se multiplica por el número de pestañas)
+    ba_z = (90 / 180) * math.pi * (rad_z + (k_factor * t))
+    ba_total_z = ba_z * num_z
+    rectos_z += (l_pestaña - (rad_z + t)) * num_z
 
-fig_3d.update_layout(scene=dict(aspectmode='data'), margin=dict(l=0, r=0, b=0, t=0))
-st.plotly_chart(fig_3d, use_container_width=True)
+# --- RESULTADOS Y 3D ---
+st.divider()
+des_x = rectos_x + ba_total_x
+des_z = rectos_z + ba_total_z
 
-# --- RESULTADO FINAL ---
-desarrollo = total_rectos_reales + total_ba
-st.success(f"### LONGITUD DE CORTE NECESARIA: {desarrollo:.2f} mm")
+st.success(f"### DIMENSIONES DE CORTE: {des_x:.2f} mm x {des_z:.2f} mm")
+
+# Visualización 3D básica
+fig = go.Figure()
+for z_p in [0, ancho_base]:
+    fig.add_trace(go.Scatter3d(x=coords_x, y=coords_y, z=[z_p]*len(coords_x), mode='lines', line=dict(color='blue', width=4)))
+fig.update_layout(scene=dict(aspectmode='data'))
+st.plotly_chart(fig, use_container_width=True)
