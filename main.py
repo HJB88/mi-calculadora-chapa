@@ -3,10 +3,10 @@ import math
 import matplotlib.pyplot as plt
 
 # Configuración de la página
-st.set_page_config(page_title="Calculadora de Plegado DIVACO", page_icon="🛠️")
+st.set_page_config(page_title="Calculadora DIVACO - Medidas Exteriores", page_icon="🛠️")
 
-st.title("🛠️ Calculadora con Previsualización de Perfil")
-st.markdown("Basada en los parámetros de **DIVACO Tooling**.")
+st.title("🛠️ Calculadora de Plegado (Medidas Exteriores)")
+st.markdown("Cálculo preciso de la longitud de corte basado en cotas externas.")
 
 # --- BARRA LATERAL ---
 st.sidebar.header("Configuración del Material")
@@ -32,21 +32,36 @@ st.sidebar.info(f"**Factor K:** {k_factor} | **R mín:** {r_min} mm")
 
 # --- ENTRADA DE DATOS ---
 st.header("Definición de la Pieza")
+tipo_medida = st.radio("Las medidas introducidas son:", ["Exteriores (Cota total)", "Interiores (Tramo recto)"])
+
 num_pliegues = st.number_input("¿Cuántos dobleces tiene?", min_value=1, max_value=10, value=1)
 
-total_rectos = 0
+total_rectos_calculados = 0
 total_ba = 0
 puntos_x = [0]
 puntos_y = [0]
-angulo_actual = 0  # En grados, acumulado para el dibujo
-
-# Primer tramo
-l_inicial = st.number_input("Longitud Tramo Inicial (mm)", min_value=1.0, value=50.0)
-total_rectos += l_inicial
-puntos_x.append(l_inicial)
-puntos_y.append(0)
+angulo_actual = 0 
 
 st.divider()
+
+# Función para ajustar tramos si son medidas exteriores
+def ajustar_tramo(valor, radio, espesor, es_punta=False):
+    if tipo_medida == "Interiores (Tramo recto)":
+        return valor
+    # Si es exterior, restamos el Radio y el Espesor para obtener el tramo recto real
+    # En las puntas solo se resta una vez, en tramos intermedios se restaría por ambos lados
+    return valor - (radio + espesor)
+
+# Primer tramo
+l_input_inicial = st.number_input("Longitud Cara Inicial (mm)", min_value=1.0, value=50.0)
+
+# Para el primer dibujo necesitamos el radio del primer pliegue
+r_primero = st.session_state.get("rad_0", t)
+l_recto_inicial = ajustar_tramo(l_input_inicial, r_primero, t) if tipo_medida == "Exteriores (Cota total)" else l_input_inicial
+
+total_rectos_calculados += l_recto_inicial
+puntos_x.append(l_recto_inicial)
+puntos_y.append(0)
 
 for i in range(num_pliegues):
     col1, col2, col3, col4 = st.columns(4)
@@ -57,36 +72,40 @@ for i in range(num_pliegues):
     with col3:
         rad = st.number_input("Radio (R)", min_value=0.1, value=t, key=f"rad_{i}")
     with col4:
-        l_sig = st.number_input("Sig. Tramo (mm)", min_value=1.0, value=50.0, key=f"l_{i}")
+        l_input_sig = st.number_input("Siguiente Cara (mm)", min_value=1.0, value=50.0, key=f"l_{i}")
 
-    # Cálculos técnicos (63277.jpg)
+    # Cálculo de BA (Fórmula técnica 63277.jpg)
     ba = (ang / 180) * math.pi * (rad + (k_factor * t))
     total_ba += ba
-    total_rectos += l_sig
+    
+    # Ajuste de medida exterior a tramo recto real
+    l_recto_sig = ajustar_tramo(l_input_sig, rad, t) if tipo_medida == "Exteriores (Cota total)" else l_input_sig
+    total_rectos_calculados += l_recto_sig
 
-    # Lógica para el dibujo (Geometría básica)
+    # Geometría para el dibujo
     cambio_ang = ang if "Arriba" in dir_p else -ang
     angulo_actual += cambio_ang
-    
     rad_ang = math.radians(angulo_actual)
-    nuevo_x = puntos_x[-1] + l_sig * math.cos(rad_ang)
-    nuevo_y = puntos_y[-1] + l_sig * math.sin(rad_ang)
     
+    nuevo_x = puntos_x[-1] + l_recto_sig * math.cos(rad_ang)
+    nuevo_y = puntos_y[-1] + l_recto_sig * math.sin(rad_ang)
     puntos_x.append(nuevo_x)
     puntos_y.append(nuevo_y)
 
 # --- VISUALIZACIÓN ---
-st.subheader("Previsualización del Perfil (Corte Lateral)")
+st.subheader("Esquema del Perfil")
 fig, ax = plt.subplots()
-ax.plot(puntos_x, puntos_y, marker='o', color='#FF4B4B', linewidth=t+1 if t < 5 else 6)
+ax.plot(puntos_x, puntos_y, marker='o', color='#1E88E5', linewidth=t+1 if t < 5 else 6)
 ax.set_aspect('equal')
-ax.grid(True, linestyle='--', alpha=0.6)
-ax.set_xlabel("mm")
-ax.set_ylabel("mm")
+ax.grid(True, linestyle='--', alpha=0.5)
 st.pyplot(fig)
 
 # --- RESULTADOS ---
 st.divider()
-longitud_final = total_rectos + total_ba
-st.metric("LONGITUD TOTAL DE CORTE (L)", f"{longitud_final:.2f} mm")
-st.info(f"Suma de tramos rectos: {total_rectos:.2f} mm | Total Bend Allowance: {total_ba:.2f} mm")
+longitud_final = total_rectos_calculados + total_ba
+st.metric("LONGITUD DE DESARROLLO (CORTE)", f"{longitud_final:.2f} mm")
+
+with st.expander("Ver detalles del cálculo"):
+    st.write(f"**Suma de tramos rectos reales:** {total_rectos_calculados:.2f} mm")
+    st.write(f"**Tolerancia de doblado total (BA):** {total_ba:.2f} mm")
+    st.caption("Nota: El cálculo convierte tus medidas exteriores a la línea neutra para asegurar la precisión.")
